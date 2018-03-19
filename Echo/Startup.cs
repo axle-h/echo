@@ -1,23 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 namespace Echo
 {
     public class Startup
     {
-        // This method gets called by the runtime. Use this method to add services to the container.
-        // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
+        private readonly IConfiguration _configuration;
+
+        public Startup(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
         public void ConfigureServices(IServiceCollection services)
         {
         }
-
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        
         public void Configure(IApplicationBuilder app, IHostingEnvironment env)
         {
             if (env.IsDevelopment())
@@ -25,10 +32,31 @@ namespace Echo
                 app.UseDeveloperExceptionPage();
             }
 
-            app.Run(async (context) =>
+            if (_configuration.GetValue<bool>("UseForwardedHeaders"))
             {
-                await context.Response.WriteAsync("Hello World!");
-            });
+                var options = new ForwardedHeadersOptions
+                              {
+                                  ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+                              };
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+                app.UseForwardedHeaders(options);
+            }
+
+            app.Run(async ctx =>
+                    {
+                        var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Request");
+                        
+                        using (var reader = new StreamReader(ctx.Request.Body))
+                        {
+                            var url = ctx.Request.GetDisplayUrl();
+                            var headers = ctx.Request.Headers.ToDictionary(h => h.Key, h => string.Join(", ", h.Value.ToArray()));
+                            var body = await reader.ReadToEndAsync();
+
+                            logger.LogInformation("{url} {headers} {body}", url, headers, body);
+                            await ctx.Response.WriteAsync(JsonConvert.SerializeObject(new { url, headers, body }, Formatting.Indented));
+                        }
+                    });
         }
     }
 }

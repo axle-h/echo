@@ -1,0 +1,11 @@
+version: '3'
+services:
+  echo:
+    build: ./Echo
+    environment:
+      - UseForwardedHeaders=true
+  proxy:
+    build: ./proxy
+    ports:
+      - "80:80"
+      - "443:443"
